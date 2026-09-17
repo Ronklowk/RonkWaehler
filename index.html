@@ -18,7 +18,7 @@
     --shadow: rgba(0, 0, 0, 0.08);
   }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
+    :root {
       --bg: #121214;
       --card-bg: #1c1c1e;
       --text: #f5f5f7;
@@ -31,21 +31,7 @@
       --shadow: rgba(0, 0, 0, 0.4);
     }
   }
-  :root[data-theme="dark"] {
-    --bg: #121214;
-    --card-bg: #1c1c1e;
-    --text: #f5f5f7;
-    --text-muted: #a1a1a6;
-    --accent: #ff6b6b;
-    --accent-hover: #ff8787;
-    --accent-active: #5fd068;
-    --accent-active-hover: #7ade7f;
-    --border: #2c2c2e;
-    --shadow: rgba(0, 0, 0, 0.4);
-  }
-
   * { box-sizing: border-box; }
-
   body {
     margin: 0;
     min-height: 100vh;
@@ -57,12 +43,7 @@
     align-items: center;
     padding: 32px 16px;
   }
-
-  .counter-wrap {
-    text-align: center;
-    margin-bottom: 40px;
-  }
-
+  .counter-wrap { text-align: center; margin-bottom: 40px; }
   .counter-label {
     font-size: 0.9rem;
     color: var(--text-muted);
@@ -70,7 +51,6 @@
     letter-spacing: 0.08em;
     margin-bottom: 6px;
   }
-
   .counter {
     font-size: clamp(3rem, 12vw, 5rem);
     font-weight: 700;
@@ -78,11 +58,7 @@
     font-variant-numeric: tabular-nums;
     transition: transform 0.15s ease;
   }
-
-  .counter.bump {
-    transform: scale(1.12);
-  }
-
+  .counter.bump { transform: scale(1.12); }
   .card {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -93,14 +69,12 @@
     box-shadow: 0 8px 24px var(--shadow);
     text-align: center;
   }
-
   .status {
     font-size: 0.95rem;
     color: var(--text-muted);
     margin-bottom: 20px;
     min-height: 1.2em;
   }
-
   button.vote-btn {
     width: 100%;
     padding: 18px 24px;
@@ -113,39 +87,13 @@
     background: var(--accent);
     transition: background 0.15s ease, transform 0.1s ease;
   }
-
-  button.vote-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button.vote-btn:active:not(:disabled) {
-    transform: scale(0.97);
-  }
-
-  button.vote-btn.voted {
-    background: var(--accent-active);
-  }
-
-  button.vote-btn.voted:hover:not(:disabled) {
-    background: var(--accent-active-hover);
-  }
-
-  button.vote-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .hint {
-    margin-top: 16px;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-  }
-
-  .error {
-    margin-top: 16px;
-    font-size: 0.85rem;
-    color: var(--accent);
-  }
+  button.vote-btn:hover:not(:disabled) { background: var(--accent-hover); }
+  button.vote-btn:active:not(:disabled) { transform: scale(0.97); }
+  button.vote-btn.voted { background: var(--accent-active); }
+  button.vote-btn.voted:hover:not(:disabled) { background: var(--accent-active-hover); }
+  button.vote-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .hint { margin-top: 16px; font-size: 0.8rem; color: var(--text-muted); }
+  .error { margin-top: 16px; font-size: 0.85rem; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -158,28 +106,36 @@
   <div class="card">
     <div class="status" id="status">Wird geladen …</div>
     <button class="vote-btn" id="voteBtn" disabled>Wählen</button>
-    <div class="hint">Jeder mit Zugriff auf diese Seite kann einmal wählen und seine Stimme jederzeit wieder zurückziehen.</div>
+    <div class="hint">Jeder mit Zugriff auf diese Seite kann wählen und seine Stimme jederzeit wieder zurückziehen.</div>
     <div class="error" id="error"></div>
   </div>
 
 <script>
-(async () => {
+(function () {
+  // Eindeutiger Schlüssel für diese Abstimmung. Der Zähler-Dienst ist öffentlich,
+  // also am besten hier einen einzigartigen, zufälligen Namen eintragen,
+  // damit er nicht mit anderen Nutzern des Dienstes kollidiert.
+  const COUNTER_KEY = 'meine-wahl-abstimmung-7f3k2';
+  const BASE = 'https://countapi.mileshilliard.com/api/v1';
+  const STORAGE_KEY = 'wahl_hat_gewaehlt_' + COUNTER_KEY;
+  const POLL_INTERVAL_MS = 4000;
+
   const counterEl = document.getElementById('counter');
   const statusEl = document.getElementById('status');
   const btnEl = document.getElementById('voteBtn');
   const errorEl = document.getElementById('error');
 
-  let db = null;
-  let user = null;
-  let uid = null;
-  let currentlyVoted = false;
   let lastCount = null;
+  let currentlyVoted = false;
 
-  function showError(msg) {
-    errorEl.textContent = msg;
+  try {
+    currentlyVoted = localStorage.getItem(STORAGE_KEY) === '1';
+  } catch (e) {
+    currentlyVoted = false;
   }
 
   function renderCount(n) {
+    if (typeof n !== 'number') return;
     if (lastCount !== null && n !== lastCount) {
       counterEl.classList.add('bump');
       setTimeout(() => counterEl.classList.remove('bump'), 150);
@@ -201,61 +157,72 @@
     }
   }
 
-  try {
-    db = await claude.use('db');
-    user = await claude.use('user');
-  } catch (e) {
-    db = null;
-    user = null;
+  function showError(msg) {
+    errorEl.textContent = msg;
   }
 
-  if (!db || !user) {
-    statusEl.textContent = 'Abstimmung ist in dieser Ansicht nicht verfügbar.';
-    counterEl.textContent = '–';
-    return;
+  async function fetchCount() {
+    try {
+      const res = await fetch(`${BASE}/get/${COUNTER_KEY}`);
+      const data = await res.json();
+      if (typeof data.value === 'number') {
+        renderCount(data.value);
+      } else {
+        renderCount(0);
+      }
+      errorEl.textContent = '';
+    } catch (e) {
+      showError('Verbindung zum Zähler-Dienst fehlgeschlagen.');
+    }
   }
 
-  try {
-    uid = await user.id();
-  } catch (e) {
-    uid = null;
-  }
-
-  if (!uid) {
-    statusEl.textContent = 'Du konntest nicht identifiziert werden.';
-    return;
-  }
-
-  const votersCol = db.collection('voters');
-
-  votersCol.onSnapshot((snap) => {
-    const docs = snap.docs || [];
-    renderCount(docs.length);
-    currentlyVoted = docs.some(d => d.id === uid);
-    renderButton();
-  }, (err) => {
-    showError('Verbindung zur Abstimmung verloren.');
-  });
-
-  btnEl.addEventListener('click', async () => {
+  async function vote() {
     btnEl.disabled = true;
     errorEl.textContent = '';
     try {
-      if (currentlyVoted) {
-        await votersCol.doc(uid).delete();
-      } else {
-        await votersCol.doc(uid).set({ voted: true, votedAt: Date.now() });
-      }
+      const res = await fetch(`${BASE}/hit/${COUNTER_KEY}`);
+      const data = await res.json();
+      if (typeof data.value === 'number') renderCount(data.value);
+      currentlyVoted = true;
+      try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
     } catch (e) {
-      if (e && e.code === 'invalid_argument') {
-        showError('Du hast keine Berechtigung zum Wählen.');
-      } else {
-        showError('Aktion fehlgeschlagen, bitte erneut versuchen.');
-      }
+      showError('Wählen fehlgeschlagen, bitte erneut versuchen.');
     } finally {
-      btnEl.disabled = false;
+      renderButton();
+    }
+  }
+
+  async function unvote() {
+    btnEl.disabled = true;
+    errorEl.textContent = '';
+    try {
+      const getRes = await fetch(`${BASE}/get/${COUNTER_KEY}`);
+      const getData = await getRes.json();
+      const current = typeof getData.value === 'number' ? getData.value : 0;
+      const newValue = Math.max(0, current - 1);
+      const setRes = await fetch(`${BASE}/set/${COUNTER_KEY}?value=${newValue}`);
+      const setData = await setRes.json();
+      if (typeof setData.value === 'number') renderCount(setData.value);
+      currentlyVoted = false;
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    } catch (e) {
+      showError('Zurückziehen fehlgeschlagen, bitte erneut versuchen.');
+    } finally {
+      renderButton();
+    }
+  }
+
+  btnEl.addEventListener('click', () => {
+    if (currentlyVoted) {
+      unvote();
+    } else {
+      vote();
     }
   });
+
+  renderButton();
+  fetchCount();
+  setInterval(fetchCount, POLL_INTERVAL_MS);
 })();
 </script>
 
