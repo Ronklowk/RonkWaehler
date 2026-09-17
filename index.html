@@ -154,6 +154,7 @@
     <div class="whoami" id="whoami"></div>
     <div class="status" id="voteStatus">Wird geladen …</div>
     <button id="voteBtn" disabled>Wählen</button>
+    <button class="secondary hidden" id="resetBtn">Wahl zurücksetzen</button>
     <button class="secondary" id="logoutBtn">Abmelden</button>
     <div class="error" id="voteError"></div>
   </div>
@@ -180,6 +181,9 @@
   // Fake-Domain, damit aus "Benutzername" intern eine E-Mail für Firebase Auth wird
   const FAKE_EMAIL_DOMAIN = "@wahl-app.local";
 
+  // UIDs, die die Wahl zurücksetzen dürfen (aus Firebase Console -> Authentication -> Users)
+  const ADMIN_UIDS = ["HCxNKxArx9alYSS5Zmd3wwrsYjQ2"];
+
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.firestore();
@@ -199,6 +203,7 @@
   const whoamiEl = document.getElementById('whoami');
   const voteStatus = document.getElementById('voteStatus');
   const voteBtn = document.getElementById('voteBtn');
+  const resetBtn = document.getElementById('resetBtn');
   const logoutBtn = document.getElementById('logoutBtn');
   const voteError = document.getElementById('voteError');
 
@@ -293,6 +298,29 @@
 
   logoutBtn.addEventListener('click', () => auth.signOut());
 
+  resetBtn.addEventListener('click', async () => {
+    if (!currentUid || !ADMIN_UIDS.includes(currentUid)) return;
+    const sure = confirm('Wirklich ALLE Stimmen löschen? Das kann nicht rückgängig gemacht werden.');
+    if (!sure) return;
+
+    resetBtn.disabled = true;
+    voteError.textContent = '';
+    try {
+      const snap = await db.collection('votes').get();
+      const docs = snap.docs;
+      // In Blöcken von 500 löschen (Firestore-Limit pro Batch)
+      for (let i = 0; i < docs.length; i += 500) {
+        const batch = db.batch();
+        docs.slice(i, i + 500).forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (e) {
+      voteError.textContent = 'Zurücksetzen fehlgeschlagen: ' + (e.message || e.code || e);
+    } finally {
+      resetBtn.disabled = false;
+    }
+  });
+
   // ---- Auf Anmeldestatus reagieren ----
   auth.onAuthStateChanged((user) => {
     if (votesUnsub) { votesUnsub(); votesUnsub = null; }
@@ -304,6 +332,12 @@
       whoamiEl.textContent = 'Angemeldet als ' + user.email.replace(FAKE_EMAIL_DOMAIN, '');
       usernameInput.value = '';
       passwordInput.value = '';
+
+      if (ADMIN_UIDS.includes(user.uid)) {
+        resetBtn.classList.remove('hidden');
+      } else {
+        resetBtn.classList.add('hidden');
+      }
 
       // Live-Zähler: alle Dokumente in "votes" wo voted == true
       votesUnsub = db.collection('votes').where('voted', '==', true)
