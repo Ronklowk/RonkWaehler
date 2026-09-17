@@ -16,6 +16,7 @@
     --accent-active-hover: #43a047;
     --border: #e5e5e7;
     --shadow: rgba(0, 0, 0, 0.08);
+    --input-bg: #f5f5f7;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -29,6 +30,7 @@
       --accent-active-hover: #7ade7f;
       --border: #2c2c2e;
       --shadow: rgba(0, 0, 0, 0.4);
+      --input-bg: #2a2a2c;
     }
   }
   * { box-sizing: border-box; }
@@ -43,7 +45,7 @@
     align-items: center;
     padding: 32px 16px;
   }
-  .counter-wrap { text-align: center; margin-bottom: 40px; }
+  .counter-wrap { text-align: center; margin-bottom: 32px; }
   .counter-label {
     font-size: 0.9rem;
     color: var(--text-muted);
@@ -75,10 +77,20 @@
     margin-bottom: 20px;
     min-height: 1.2em;
   }
-  button.vote-btn {
+  input[type="text"], input[type="password"] {
     width: 100%;
-    padding: 18px 24px;
-    font-size: 1.15rem;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  button {
+    width: 100%;
+    padding: 16px 24px;
+    font-size: 1.05rem;
     font-weight: 600;
     border: none;
     border-radius: 14px;
@@ -87,13 +99,37 @@
     background: var(--accent);
     transition: background 0.15s ease, transform 0.1s ease;
   }
-  button.vote-btn:hover:not(:disabled) { background: var(--accent-hover); }
-  button.vote-btn:active:not(:disabled) { transform: scale(0.97); }
-  button.vote-btn.voted { background: var(--accent-active); }
-  button.vote-btn.voted:hover:not(:disabled) { background: var(--accent-active-hover); }
-  button.vote-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-  .hint { margin-top: 16px; font-size: 0.8rem; color: var(--text-muted); }
-  .error { margin-top: 16px; font-size: 0.85rem; color: var(--accent); }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:active:not(:disabled) { transform: scale(0.97); }
+  button.voted { background: var(--accent-active); }
+  button.voted:hover:not(:disabled) { background: var(--accent-active-hover); }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  button.secondary {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    margin-top: 8px;
+  }
+  button.secondary:hover:not(:disabled) { background: var(--input-bg); }
+  .toggle-link {
+    margin-top: 14px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .error {
+    margin-top: 14px;
+    font-size: 0.85rem;
+    color: var(--accent);
+    min-height: 1.2em;
+  }
+  .whoami {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -103,35 +139,79 @@
     <div class="counter" id="counter">–</div>
   </div>
 
-  <div class="card">
-    <div class="status" id="status">Wird geladen …</div>
-    <button class="vote-btn" id="voteBtn" disabled>Wählen</button>
-    <div class="hint">Jeder mit Zugriff auf diese Seite kann wählen und seine Stimme jederzeit wieder zurückziehen.</div>
-    <div class="error" id="error"></div>
+  <!-- Login / Registrieren -->
+  <div class="card" id="authCard">
+    <div class="status" id="authStatus">Anmelden</div>
+    <input type="text" id="usernameInput" placeholder="Benutzername" autocomplete="username">
+    <input type="password" id="passwordInput" placeholder="Passwort" autocomplete="current-password">
+    <button id="authBtn">Anmelden</button>
+    <div class="toggle-link" id="toggleMode">Noch kein Konto? Registrieren</div>
+    <div class="error" id="authError"></div>
   </div>
 
+  <!-- Abstimmung -->
+  <div class="card hidden" id="voteCard">
+    <div class="whoami" id="whoami"></div>
+    <div class="status" id="voteStatus">Wird geladen …</div>
+    <button id="voteBtn" disabled>Wählen</button>
+    <button class="secondary" id="logoutBtn">Abmelden</button>
+    <div class="error" id="voteError"></div>
+  </div>
+
+<!-- Firebase SDK (kompatibel/v8-Syntax, einfach einzubinden) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
 <script>
-(function () {
-  // Eindeutiger Schlüssel für diese Abstimmung. Der Zähler-Dienst ist öffentlich,
-  // also am besten hier einen einzigartigen, zufälligen Namen eintragen,
-  // damit er nicht mit anderen Nutzern des Dienstes kollidiert.
-  const COUNTER_KEY = 'meine-wahl-abstimmung-7f3k2';
-  const BASE = 'https://countapi.mileshilliard.com/api/v1';
-  const STORAGE_KEY = 'wahl_hat_gewaehlt_' + COUNTER_KEY;
-  const POLL_INTERVAL_MS = 4000;
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDBTAhPnUpsdrcP51JFwqf9KDipSPQY0v4",
+  authDomain: "ronkwaehler.firebaseapp.com",
+  projectId: "ronkwaehler",
+  storageBucket: "ronkwaehler.firebasestorage.app",
+  messagingSenderId: "630791565245",
+  appId: "1:630791565245:web:27d01675ac9ea322586cd4",
+  measurementId: "G-PRYL4XDNV6"
+};
+  };
+  // Fake-Domain, damit aus "Benutzername" intern eine E-Mail für Firebase Auth wird
+  const FAKE_EMAIL_DOMAIN = "@wahl-app.local";
 
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // ---- Elemente ----
   const counterEl = document.getElementById('counter');
-  const statusEl = document.getElementById('status');
-  const btnEl = document.getElementById('voteBtn');
-  const errorEl = document.getElementById('error');
 
+  const authCard = document.getElementById('authCard');
+  const authStatus = document.getElementById('authStatus');
+  const usernameInput = document.getElementById('usernameInput');
+  const passwordInput = document.getElementById('passwordInput');
+  const authBtn = document.getElementById('authBtn');
+  const toggleMode = document.getElementById('toggleMode');
+  const authError = document.getElementById('authError');
+
+  const voteCard = document.getElementById('voteCard');
+  const whoamiEl = document.getElementById('whoami');
+  const voteStatus = document.getElementById('voteStatus');
+  const voteBtn = document.getElementById('voteBtn');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const voteError = document.getElementById('voteError');
+
+  let isRegisterMode = false;
   let lastCount = null;
+  let currentUid = null;
   let currentlyVoted = false;
+  let votesUnsub = null;
 
-  try {
-    currentlyVoted = localStorage.getItem(STORAGE_KEY) === '1';
-  } catch (e) {
-    currentlyVoted = false;
+  function sanitizeUsername(name) {
+    return name.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+  }
+
+  function usernameToEmail(name) {
+    return sanitizeUsername(name) + FAKE_EMAIL_DOMAIN;
   }
 
   function renderCount(n) {
@@ -144,86 +224,120 @@
     counterEl.textContent = n;
   }
 
-  function renderButton() {
-    btnEl.disabled = false;
+  function renderVoteButton() {
+    voteBtn.disabled = false;
     if (currentlyVoted) {
-      btnEl.textContent = 'Stimme zurückziehen';
-      btnEl.classList.add('voted');
-      statusEl.textContent = 'Du hast gewählt.';
+      voteBtn.textContent = 'Stimme zurückziehen';
+      voteBtn.classList.add('voted');
+      voteStatus.textContent = 'Du hast gewählt.';
     } else {
-      btnEl.textContent = 'Wählen';
-      btnEl.classList.remove('voted');
-      statusEl.textContent = 'Du hast noch nicht gewählt.';
+      voteBtn.textContent = 'Wählen';
+      voteBtn.classList.remove('voted');
+      voteStatus.textContent = 'Du hast noch nicht gewählt.';
     }
   }
 
-  function showError(msg) {
-    errorEl.textContent = msg;
-  }
+  // ---- Auth: Anmelden / Registrieren umschalten ----
+  toggleMode.addEventListener('click', () => {
+    isRegisterMode = !isRegisterMode;
+    authStatus.textContent = isRegisterMode ? 'Registrieren' : 'Anmelden';
+    authBtn.textContent = isRegisterMode ? 'Konto erstellen' : 'Anmelden';
+    toggleMode.textContent = isRegisterMode ? 'Schon ein Konto? Anmelden' : 'Noch kein Konto? Registrieren';
+    authError.textContent = '';
+  });
 
-  async function fetchCount() {
+  authBtn.addEventListener('click', async () => {
+    const username = usernameInput.value;
+    const password = passwordInput.value;
+    authError.textContent = '';
+
+    if (sanitizeUsername(username).length < 3) {
+      authError.textContent = 'Benutzername braucht mind. 3 Zeichen (nur Buchstaben, Zahlen, _ . -).';
+      return;
+    }
+    if (password.length < 6) {
+      authError.textContent = 'Passwort braucht mind. 6 Zeichen.';
+      return;
+    }
+
+    authBtn.disabled = true;
+    const email = usernameToEmail(username);
+
     try {
-      const res = await fetch(`${BASE}/get/${COUNTER_KEY}`);
-      const data = await res.json();
-      if (typeof data.value === 'number') {
-        renderCount(data.value);
+      if (isRegisterMode) {
+        await auth.createUserWithEmailAndPassword(email, password);
       } else {
-        renderCount(0);
+        await auth.signInWithEmailAndPassword(email, password);
       }
-      errorEl.textContent = '';
     } catch (e) {
-      showError('Verbindung zum Zähler-Dienst fehlgeschlagen.');
-    }
-  }
-
-  async function vote() {
-    btnEl.disabled = true;
-    errorEl.textContent = '';
-    try {
-      const res = await fetch(`${BASE}/hit/${COUNTER_KEY}`);
-      const data = await res.json();
-      if (typeof data.value === 'number') renderCount(data.value);
-      currentlyVoted = true;
-      try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
-    } catch (e) {
-      showError('Wählen fehlgeschlagen, bitte erneut versuchen.');
+      authError.textContent = translateAuthError(e.code);
     } finally {
-      renderButton();
-    }
-  }
-
-  async function unvote() {
-    btnEl.disabled = true;
-    errorEl.textContent = '';
-    try {
-      const getRes = await fetch(`${BASE}/get/${COUNTER_KEY}`);
-      const getData = await getRes.json();
-      const current = typeof getData.value === 'number' ? getData.value : 0;
-      const newValue = Math.max(0, current - 1);
-      const setRes = await fetch(`${BASE}/set/${COUNTER_KEY}?value=${newValue}`);
-      const setData = await setRes.json();
-      if (typeof setData.value === 'number') renderCount(setData.value);
-      currentlyVoted = false;
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-    } catch (e) {
-      showError('Zurückziehen fehlgeschlagen, bitte erneut versuchen.');
-    } finally {
-      renderButton();
-    }
-  }
-
-  btnEl.addEventListener('click', () => {
-    if (currentlyVoted) {
-      unvote();
-    } else {
-      vote();
+      authBtn.disabled = false;
     }
   });
 
-  renderButton();
-  fetchCount();
-  setInterval(fetchCount, POLL_INTERVAL_MS);
-})();
+  function translateAuthError(code) {
+    switch (code) {
+      case 'auth/email-already-in-use': return 'Dieser Benutzername ist schon vergeben.';
+      case 'auth/invalid-email': return 'Ungültiger Benutzername.';
+      case 'auth/weak-password': return 'Passwort zu schwach (mind. 6 Zeichen).';
+      case 'auth/user-not-found':
+      case 'auth/wrong-password':
+      case 'auth/invalid-credential': return 'Benutzername oder Passwort falsch.';
+      case 'auth/too-many-requests': return 'Zu viele Versuche, bitte kurz warten.';
+      default: return 'Fehler: ' + code;
+    }
+  }
+
+  logoutBtn.addEventListener('click', () => auth.signOut());
+
+  // ---- Auf Anmeldestatus reagieren ----
+  auth.onAuthStateChanged((user) => {
+    if (votesUnsub) { votesUnsub(); votesUnsub = null; }
+
+    if (user) {
+      currentUid = user.uid;
+      authCard.classList.add('hidden');
+      voteCard.classList.remove('hidden');
+      whoamiEl.textContent = 'Angemeldet als ' + user.email.replace(FAKE_EMAIL_DOMAIN, '');
+      usernameInput.value = '';
+      passwordInput.value = '';
+
+      // Live-Zähler: alle Dokumente in "votes" wo voted == true
+      votesUnsub = db.collection('votes').where('voted', '==', true)
+        .onSnapshot((snap) => {
+          renderCount(snap.size);
+          const mine = snap.docs.find(d => d.id === currentUid);
+          currentlyVoted = !!mine;
+          renderVoteButton();
+        }, (err) => {
+          voteError.textContent = 'Verbindung zur Abstimmung verloren.';
+        });
+    } else {
+      currentUid = null;
+      voteCard.classList.add('hidden');
+      authCard.classList.remove('hidden');
+      lastCount = null;
+      counterEl.textContent = '–';
+    }
+  });
+
+  voteBtn.addEventListener('click', async () => {
+    if (!currentUid) return;
+    voteBtn.disabled = true;
+    voteError.textContent = '';
+    const docRef = db.collection('votes').doc(currentUid);
+    try {
+      if (currentlyVoted) {
+        await docRef.delete();
+      } else {
+        await docRef.set({ voted: true, votedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+    } catch (e) {
+      voteError.textContent = 'Aktion fehlgeschlagen, bitte erneut versuchen.';
+      voteBtn.disabled = false;
+    }
+  });
 </script>
 
 </body>
