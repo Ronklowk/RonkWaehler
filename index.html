@@ -164,16 +164,18 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 
 <script>
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyDBTAhPnUpsdrcP51JFwqf9KDipSPQY0v4",
-  authDomain: "ronkwaehler.firebaseapp.com",
-  projectId: "ronkwaehler",
-  storageBucket: "ronkwaehler.firebasestorage.app",
-  messagingSenderId: "630791565245",
-  appId: "1:630791565245:web:27d01675ac9ea322586cd4",
-  measurementId: "G-PRYL4XDNV6"
-};
+  // ==========================================================
+  // HIER DEINE FIREBASE-KONFIGURATION EINTRAGEN
+  // (Firebase Console -> Projekteinstellungen -> "Meine Apps" -> Web-App)
+  // ==========================================================
+  const firebaseConfig = {
+    apiKey: "AIzaSyDBTAhPnUpsdrcP51JFwqf9KDipSPQY0v4",
+    authDomain: "ronkwaehler.firebaseapp.com",
+    projectId: "ronkwaehler",
+    storageBucket: "ronkwaehler.firebasestorage.app",
+    messagingSenderId: "630791565245",
+    appId: "1:630791565245:web:27d01675ac9ea322586cd4",
+    measurementId: "G-PRYL4XDNV6"
   };
   // Fake-Domain, damit aus "Benutzername" intern eine E-Mail für Firebase Auth wird
   const FAKE_EMAIL_DOMAIN = "@wahl-app.local";
