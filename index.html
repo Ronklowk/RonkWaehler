@@ -142,16 +142,29 @@
     font-size: 0.95rem;
     word-break: break-word;
   }
+  .option-row .option-count {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    min-width: 2ch;
+    text-align: right;
+  }
   .option-row button {
     width: auto;
     padding: 8px 12px;
     font-size: 0.85rem;
     border-radius: 8px;
+    color: white;
+  }
+  .option-row button.select-btn { background: var(--accent); border: none; }
+  .option-row button.select-btn:hover:not(:disabled) { background: var(--accent-hover); }
+  .option-row button.select-btn.voted { background: var(--accent-active); }
+  .option-row button.select-btn.voted:hover:not(:disabled) { background: var(--accent-active-hover); }
+  .option-row button.remove-btn {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--accent);
   }
-  .option-row button:hover:not(:disabled) { background: var(--input-bg); }
+  .option-row button.remove-btn:hover:not(:disabled) { background: var(--input-bg); }
   .options-empty {
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -183,19 +196,18 @@
     <div class="error" id="authError"></div>
   </div>
 
-  <!-- Abstimmung -->
+  <!-- Konto -->
   <div class="card hidden" id="voteCard">
     <div class="whoami" id="whoami"></div>
-    <div class="status" id="voteStatus">Wird geladen …</div>
-    <button id="voteBtn" disabled>Wählen</button>
+    <div class="status" id="voteStatus">Wähle unten eine Option.</div>
     <button class="secondary hidden" id="resetBtn">Wahl zurücksetzen</button>
     <button class="secondary" id="logoutBtn">Abmelden</button>
     <div class="error" id="voteError"></div>
   </div>
 
-  <!-- Optionen verwalten (nur Admin) -->
+  <!-- Optionen (wählbar für alle, verwaltbar nur für Admin) -->
   <div class="card hidden" id="optionsCard">
-    <div class="status">Optionen verwalten</div>
+    <div class="status">Optionen</div>
     <div id="optionsList"></div>
     <div class="add-row">
       <input type="text" id="newOptionInput" placeholder="Neue Option">
@@ -261,9 +273,12 @@
   let isRegisterMode = false;
   let lastCount = null;
   let currentUid = null;
-  let currentlyVoted = false;
   let votesUnsub = null;
   let optionsUnsub = null;
+  let optionsDocs = [];
+  let voteCounts = {};
+  let mySelectedOptionId = null;
+  let currentIsAdmin = false;
 
   function sanitizeUsername(name) {
     return name.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
@@ -281,19 +296,6 @@
     }
     lastCount = n;
     counterEl.textContent = n;
-  }
-
-  function renderVoteButton() {
-    voteBtn.disabled = false;
-    if (currentlyVoted) {
-      voteBtn.textContent = 'Stimme zurückziehen';
-      voteBtn.classList.add('voted');
-      voteStatus.textContent = 'Du hast gewählt.';
-    } else {
-      voteBtn.textContent = 'Wählen';
-      voteBtn.classList.remove('voted');
-      voteStatus.textContent = 'Du hast noch nicht gewählt.';
-    }
   }
 
   // ---- Auth: Anmelden / Registrieren umschalten ----
@@ -350,17 +352,20 @@
 
   logoutBtn.addEventListener('click', () => auth.signOut());
 
-  function renderOptions(docs) {
+  function renderOptions() {
     optionsList.innerHTML = '';
-    if (docs.length === 0) {
+    if (optionsDocs.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'options-empty';
       empty.textContent = 'Noch keine Optionen vorhanden.';
       optionsList.appendChild(empty);
       return;
     }
-    docs.forEach((doc) => {
+    optionsDocs.forEach((doc) => {
       const data = doc.data();
+      const isSelected = mySelectedOptionId === doc.id;
+      const count = voteCounts[doc.id] || 0;
+
       const row = document.createElement('div');
       row.className = 'option-row';
 
@@ -368,13 +373,42 @@
       span.textContent = data.text || '';
       row.appendChild(span);
 
-      const removeBtn = document.createElement('button');
-      removeBtn.textContent = 'Entfernen';
-      removeBtn.addEventListener('click', () => removeOption(doc.id));
-      row.appendChild(removeBtn);
+      const countEl = document.createElement('span');
+      countEl.className = 'option-count';
+      countEl.textContent = count;
+      row.appendChild(countEl);
+
+      const selectBtn = document.createElement('button');
+      selectBtn.className = 'select-btn' + (isSelected ? ' voted' : '');
+      selectBtn.textContent = isSelected ? 'Gewählt' : 'Wählen';
+      selectBtn.addEventListener('click', () => voteForOption(doc.id, isSelected));
+      row.appendChild(selectBtn);
+
+      if (currentIsAdmin) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-btn';
+        removeBtn.textContent = 'Entfernen';
+        removeBtn.addEventListener('click', () => removeOption(doc.id));
+        row.appendChild(removeBtn);
+      }
 
       optionsList.appendChild(row);
     });
+  }
+
+  async function voteForOption(optionId, wasSelected) {
+    if (!currentUid) return;
+    voteError.textContent = '';
+    const docRef = db.collection('votes').doc(currentUid);
+    try {
+      if (wasSelected) {
+        await docRef.delete();
+      } else {
+        await docRef.set({ optionId: optionId, votedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+    } catch (e) {
+      voteError.textContent = 'Aktion fehlgeschlagen, bitte erneut versuchen.';
+    }
   }
 
   async function removeOption(id) {
@@ -447,26 +481,38 @@
       usernameInput.value = '';
       passwordInput.value = '';
 
-      const isAdmin = ADMIN_UIDS.includes(user.uid);
-      resetBtn.classList.toggle('hidden', !isAdmin);
-      document.querySelector('.add-row').classList.toggle('hidden', !isAdmin);
+      currentIsAdmin = ADMIN_UIDS.includes(user.uid);
+      resetBtn.classList.toggle('hidden', !currentIsAdmin);
+      document.querySelector('.add-row').classList.toggle('hidden', !currentIsAdmin);
 
       // Optionen-Karte für ALLE sichtbar, Bearbeiten nur für Admin (siehe renderOptions)
       optionsCard.classList.remove('hidden');
       optionsUnsub = db.collection('options').orderBy('createdAt', 'asc')
-        .onSnapshot((snap) => renderOptions(snap.docs, isAdmin), (err) => {
-          optionsError.textContent = 'Optionen konnten nicht geladen werden.';
+        .onSnapshot((snap) => {
+          optionsDocs = snap.docs;
+          renderOptions();
+        }, (err) => {
+          optionsError.textContent = 'Optionen konnten nicht geladen werden: ' + (err.message || err.code || err);
         });
 
-      // Live-Zähler: alle Dokumente in "votes" wo voted == true
-      votesUnsub = db.collection('votes').where('voted', '==', true)
+      // Live-Zähler + Stimmen pro Option
+      votesUnsub = db.collection('votes')
         .onSnapshot((snap) => {
           renderCount(snap.size);
-          const mine = snap.docs.find(d => d.id === currentUid);
-          currentlyVoted = !!mine;
-          renderVoteButton();
+          voteCounts = {};
+          mySelectedOptionId = null;
+          snap.docs.forEach((d) => {
+            const data = d.data();
+            if (data.optionId) {
+              voteCounts[data.optionId] = (voteCounts[data.optionId] || 0) + 1;
+            }
+            if (d.id === currentUid) {
+              mySelectedOptionId = data.optionId || null;
+            }
+          });
+          renderOptions();
         }, (err) => {
-          voteError.textContent = 'Verbindung zur Abstimmung verloren.';
+          voteError.textContent = 'Verbindung zur Abstimmung verloren: ' + (err.message || err.code || err);
         });
     } else {
       currentUid = null;
@@ -477,22 +523,6 @@
     }
   });
 
-  voteBtn.addEventListener('click', async () => {
-    if (!currentUid) return;
-    voteBtn.disabled = true;
-    voteError.textContent = '';
-    const docRef = db.collection('votes').doc(currentUid);
-    try {
-      if (currentlyVoted) {
-        await docRef.delete();
-      } else {
-        await docRef.set({ voted: true, votedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      }
-    } catch (e) {
-      voteError.textContent = 'Aktion fehlgeschlagen, bitte erneut versuchen.';
-      voteBtn.disabled = false;
-    }
-  });
 </script>
 
 </body>
