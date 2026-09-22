@@ -447,17 +447,16 @@
       usernameInput.value = '';
       passwordInput.value = '';
 
-      if (ADMIN_UIDS.includes(user.uid)) {
-        resetBtn.classList.remove('hidden');
-        optionsCard.classList.remove('hidden');
-        optionsUnsub = db.collection('options').orderBy('createdAt', 'asc')
-          .onSnapshot((snap) => renderOptions(snap.docs), (err) => {
-            optionsError.textContent = 'Optionen konnten nicht geladen werden.';
-          });
-      } else {
-        resetBtn.classList.add('hidden');
-        optionsCard.classList.add('hidden');
-      }
+      const isAdmin = ADMIN_UIDS.includes(user.uid);
+      resetBtn.classList.toggle('hidden', !isAdmin);
+      document.querySelector('.add-row').classList.toggle('hidden', !isAdmin);
+
+      // Optionen-Karte für ALLE sichtbar, Bearbeiten nur für Admin (siehe renderOptions)
+      optionsCard.classList.remove('hidden');
+      optionsUnsub = db.collection('options').orderBy('createdAt', 'asc')
+        .onSnapshot((snap) => renderOptions(snap.docs, isAdmin), (err) => {
+          optionsError.textContent = 'Optionen konnten nicht geladen werden.';
+        });
 
       // Live-Zähler: alle Dokumente in "votes" wo voted == true
       votesUnsub = db.collection('votes').where('voted', '==', true)
