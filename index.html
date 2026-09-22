@@ -130,6 +130,40 @@
     margin-bottom: 16px;
   }
   .hidden { display: none !important; }
+  .option-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    text-align: left;
+  }
+  .option-row span {
+    flex: 1;
+    font-size: 0.95rem;
+    word-break: break-word;
+  }
+  .option-row button {
+    width: auto;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--accent);
+  }
+  .option-row button:hover:not(:disabled) { background: var(--input-bg); }
+  .options-empty {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .add-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .add-row input { margin-bottom: 0; }
+  .add-row button { width: auto; padding: 12px 16px; }
 </style>
 </head>
 <body>
@@ -157,6 +191,17 @@
     <button class="secondary hidden" id="resetBtn">Wahl zurücksetzen</button>
     <button class="secondary" id="logoutBtn">Abmelden</button>
     <div class="error" id="voteError"></div>
+  </div>
+
+  <!-- Optionen verwalten (nur Admin) -->
+  <div class="card hidden" id="optionsCard">
+    <div class="status">Optionen verwalten</div>
+    <div id="optionsList"></div>
+    <div class="add-row">
+      <input type="text" id="newOptionInput" placeholder="Neue Option">
+      <button id="addOptionBtn">Hinzufügen</button>
+    </div>
+    <div class="error" id="optionsError"></div>
   </div>
 
 <!-- Firebase SDK (kompatibel/v8-Syntax, einfach einzubinden) -->
@@ -207,11 +252,18 @@
   const logoutBtn = document.getElementById('logoutBtn');
   const voteError = document.getElementById('voteError');
 
+  const optionsCard = document.getElementById('optionsCard');
+  const optionsList = document.getElementById('optionsList');
+  const newOptionInput = document.getElementById('newOptionInput');
+  const addOptionBtn = document.getElementById('addOptionBtn');
+  const optionsError = document.getElementById('optionsError');
+
   let isRegisterMode = false;
   let lastCount = null;
   let currentUid = null;
   let currentlyVoted = false;
   let votesUnsub = null;
+  let optionsUnsub = null;
 
   function sanitizeUsername(name) {
     return name.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
@@ -298,6 +350,67 @@
 
   logoutBtn.addEventListener('click', () => auth.signOut());
 
+  function renderOptions(docs) {
+    optionsList.innerHTML = '';
+    if (docs.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'options-empty';
+      empty.textContent = 'Noch keine Optionen vorhanden.';
+      optionsList.appendChild(empty);
+      return;
+    }
+    docs.forEach((doc) => {
+      const data = doc.data();
+      const row = document.createElement('div');
+      row.className = 'option-row';
+
+      const span = document.createElement('span');
+      span.textContent = data.text || '';
+      row.appendChild(span);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = 'Entfernen';
+      removeBtn.addEventListener('click', () => removeOption(doc.id));
+      row.appendChild(removeBtn);
+
+      optionsList.appendChild(row);
+    });
+  }
+
+  async function removeOption(id) {
+    optionsError.textContent = '';
+    try {
+      await db.collection('options').doc(id).delete();
+    } catch (e) {
+      optionsError.textContent = 'Entfernen fehlgeschlagen: ' + (e.message || e.code || e);
+    }
+  }
+
+  addOptionBtn.addEventListener('click', async () => {
+    const text = newOptionInput.value.trim();
+    optionsError.textContent = '';
+    if (!text) {
+      optionsError.textContent = 'Bitte einen Text eingeben.';
+      return;
+    }
+    addOptionBtn.disabled = true;
+    try {
+      await db.collection('options').add({
+        text: text,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      newOptionInput.value = '';
+    } catch (e) {
+      optionsError.textContent = 'Hinzufügen fehlgeschlagen: ' + (e.message || e.code || e);
+    } finally {
+      addOptionBtn.disabled = false;
+    }
+  });
+
+  newOptionInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addOptionBtn.click();
+  });
+
   resetBtn.addEventListener('click', async () => {
     if (!currentUid || !ADMIN_UIDS.includes(currentUid)) return;
     const sure = confirm('Wirklich ALLE Stimmen löschen? Das kann nicht rückgängig gemacht werden.');
@@ -324,6 +437,7 @@
   // ---- Auf Anmeldestatus reagieren ----
   auth.onAuthStateChanged((user) => {
     if (votesUnsub) { votesUnsub(); votesUnsub = null; }
+    if (optionsUnsub) { optionsUnsub(); optionsUnsub = null; }
 
     if (user) {
       currentUid = user.uid;
@@ -335,8 +449,14 @@
 
       if (ADMIN_UIDS.includes(user.uid)) {
         resetBtn.classList.remove('hidden');
+        optionsCard.classList.remove('hidden');
+        optionsUnsub = db.collection('options').orderBy('createdAt', 'asc')
+          .onSnapshot((snap) => renderOptions(snap.docs), (err) => {
+            optionsError.textContent = 'Optionen konnten nicht geladen werden.';
+          });
       } else {
         resetBtn.classList.add('hidden');
+        optionsCard.classList.add('hidden');
       }
 
       // Live-Zähler: alle Dokumente in "votes" wo voted == true
